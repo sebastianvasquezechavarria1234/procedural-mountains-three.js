@@ -1,11 +1,10 @@
 import { useRef, useMemo } from 'react'
 import { useFrame } from '@react-three/fiber'
 import * as THREE from 'three'
- // if available? The user didn't mention leva. I will just pass uniforms.
 
 const vertexShader = `
   // 1. Noise
-  // Función para generar Simplex Noise 2D. Se utiliza como base para la generación procedural.
+  // Simplex Noise 2D
   vec3 permute(vec3 x) { return mod(((x*34.0)+1.0)*x, 289.0); }
   float snoise(vec2 v){
     const vec4 C = vec4(0.211324865405187, 0.366025403784439,
@@ -34,81 +33,68 @@ const vertexShader = `
     return 130.0 * dot(m, g);
   }
 
-  // 4. Ridged Noise
-  // Modifica el noise base para crear crestas afiladas (peaks) usando valor absoluto.
+  // 4. Ridged Noise (Montañas realistas)
+  // Genera crestas afiladas tomando el valor absoluto invertido
   float ridgedNoise(vec2 p) {
     float n = snoise(p);
-    n = 1.0 - abs(n); // Invierte el valor absoluto para generar picos afilados
-    return n * n; // Elevar al cuadrado hace los picos más pronunciados
+    n = 1.0 - abs(n);
+    return n * n; // Cuadrado para hacer los picos más agudos y los valles más planos
   }
 
   // 8. Uniforms
   uniform float uMaxHeight;
   uniform float uScale;
-  uniform float uOctaves;
-  uniform float uFrequency;
-  uniform float uAmplitude;
-  uniform float uDomainWarpingStrength;
-  uniform float uDomainWarpingScale;
-  uniform float uRidgedStrength;
 
   varying float vElevation;
   varying vec3 vNormal;
   varying vec3 vPosition;
 
-  // 3. Domain Warping
-  // Distorsiona las coordenadas de entrada usando ruido, rompiendo la repetición y creando formas más orgánicas.
-  vec2 domainWarping(vec2 p) {
-    vec2 q = vec2(
-      snoise(p + vec2(0.0, 0.0) * uDomainWarpingScale),
-      snoise(p + vec2(5.2, 1.3) * uDomainWarpingScale)
-    );
-    return p + q * uDomainWarpingStrength;
-  }
-
-  // 2. FBM (Fractal Brownian Motion)
-  // Suma múltiples capas (octavas) de ruido con frecuencias crecientes y amplitudes decrecientes para añadir detalle.
-  float fbm(vec2 p) {
+  // 2. FBM (Ridged Multifractal)
+  // Este es el algoritmo estándar de la industria para generar cadenas montañosas.
+  // Combina múltiples octavas de ruido con pesos dinámicos para que los valles
+  // sean suaves y los picos sean muy escarpados.
+  float getElevation(vec2 p) {
+    vec2 pos = p * uScale;
+    
     float value = 0.0;
-    float amplitude = uAmplitude;
-    float frequency = uFrequency;
+    float amplitude = 0.6;
+    float frequency = 1.0;
+    float weight = 1.0; // Ayuda a aplanar los valles
     
-    // Aplicamos Domain Warping a las coordenadas base
-    vec2 warpedP = domainWarping(p);
+    // Rotación para romper la alineación de la grilla del simplex noise
+    mat2 rot = mat2(0.8, -0.6, 0.6, 0.8);
     
-    for (int i = 0; i < 10; i++) {
-      if (float(i) >= uOctaves) break; // Limitamos según el uniform
+    for (int i = 0; i < 8; i++) {
+      // Usamos ridged noise puro para las montañas
+      float n = ridgedNoise(pos * frequency);
       
-      // Combinamos ruido normal con ridged noise según uRidgedStrength
-      float n = mix(snoise(warpedP * frequency) * 0.5 + 0.5, ridgedNoise(warpedP * frequency), uRidgedStrength);
+      // Aplicamos el peso. Si estamos en un valle, los detalles finos se suavizan.
+      n *= weight;
+      weight = clamp(n * 2.0, 0.0, 1.0);
       
       value += n * amplitude;
       
-      frequency *= 2.0; // Aumentamos la frecuencia para más detalle en la siguiente octava
-      amplitude *= 0.5; // Reducimos la influencia (amplitud) de los detalles finos
+      frequency *= 2.0;
+      amplitude *= 0.5;
+      pos = rot * pos; // Rotar coordenadas en cada octava para mayor naturalidad
     }
     
-    return value;
-  }
-
-  // 5. Elevación del terreno
-  float getElevation(vec2 p) {
-    return fbm(p * uScale) * uMaxHeight;
+    // Suavizamos un poco el valle base
+    return (value * value * 0.7) * uMaxHeight;
   }
 
   void main() {
     vec3 pos = position;
     
-    // Obtenemos la elevación en el punto actual
+    // 5. Elevación del terreno
     float elevation = getElevation(pos.xy);
     pos.z += elevation;
     
-    vElevation = pos.z;
+    vElevation = elevation;
     vPosition = (modelMatrix * vec4(pos, 1.0)).xyz;
 
     // 6. Cálculo de normales procedural
-    // Calculamos la elevación en puntos cercanos para obtener los vectores tangentes y luego la normal.
-    float offset = 0.01;
+    float offset = 0.05; // Offset más amplio para evitar "facetado" o ruido
     float elevationX = getElevation(position.xy + vec2(offset, 0.0));
     float elevationY = getElevation(position.xy + vec2(0.0, offset));
     
@@ -119,7 +105,6 @@ const vertexShader = `
     vec3 tangentX = normalize(pX - p0);
     vec3 tangentY = normalize(pY - p0);
     
-    // Producto cruzado para encontrar el vector perpendicular (normal)
     vec3 objectNormal = normalize(cross(tangentX, tangentY));
     vNormal = normalize((modelMatrix * vec4(objectNormal, 0.0)).xyz);
 
@@ -137,40 +122,39 @@ const fragmentShader = `
   uniform vec3 uSunColor;
 
   void main() {
-    // 7. Coloreado por altura
-    // Definimos colores para diferentes zonas (Verde, Tierra, Roca, Nieve)
-    vec3 colorLow = vec3(0.18, 0.45, 0.15);  // Verde para zonas bajas
-    vec3 colorMid = vec3(0.40, 0.32, 0.20);  // Tierra para zonas medias
-    vec3 colorHigh = vec3(0.35, 0.35, 0.35); // Roca para zonas altas
-    vec3 colorSnow = vec3(0.95, 0.95, 0.95); // Nieve para las cimas
+    // 7. Coloreado por altura y biomas
+    // Colores realistas de una montaña alpina
+    vec3 colorValley = vec3(0.12, 0.25, 0.10);  // Verde bosque oscuro para los valles
+    vec3 colorBase = vec3(0.25, 0.35, 0.15);    // Verde claro/musgo para faldas de la montaña
+    vec3 colorRock = vec3(0.40, 0.38, 0.35);    // Roca gris/café para la ladera
+    vec3 colorSnow = vec3(0.95, 0.98, 1.00);    // Nieve pura para las cumbres
 
-    // Normalizamos la altura para usarla en los gradientes
-    float normalizedHeight = clamp(vElevation / uMaxHeight, 0.0, 1.0);
+    float h = vElevation / uMaxHeight; // Normalizado 0.0 a 1.0
 
-    // Utilizamos smoothstep y mix para transiciones suaves entre biomas
-    float step1 = smoothstep(0.1, 0.3, normalizedHeight);
-    float step2 = smoothstep(0.45, 0.65, normalizedHeight);
-    float step3 = smoothstep(0.75, 0.9, normalizedHeight);
+    // Transiciones naturales
+    vec3 terrainColor = mix(colorValley, colorBase, smoothstep(0.0, 0.2, h));
+    terrainColor = mix(terrainColor, colorRock, smoothstep(0.2, 0.5, h));
+    terrainColor = mix(terrainColor, colorSnow, smoothstep(0.6, 0.85, h));
 
-    vec3 terrainColor = mix(colorLow, colorMid, step1);
-    terrainColor = mix(terrainColor, colorHigh, step2);
-    terrainColor = mix(terrainColor, colorSnow, step3);
+    // Añadir nieve en las grietas o pendientes suaves altas
+    vec3 normal = normalize(vNormal);
+    float slope = dot(normal, vec3(0.0, 1.0, 0.0)); // Qué tan plana es la superficie (1.0 = plano)
+    
+    // Si estamos alto y es plano, se acumula nieve
+    float snowAccumulation = smoothstep(0.4, 0.6, h) * smoothstep(0.7, 0.9, slope);
+    terrainColor = mix(terrainColor, colorSnow, snowAccumulation * 0.8);
 
     // 9. Renderizado final (Iluminación)
-    // Calculamos la luz direccional base (Diffuse)
-    vec3 normal = normalize(vNormal);
     vec3 lightDir = normalize(uSunDirection);
     
-    // Iluminación difusa (lambert)
+    // Iluminación difusa
     float diff = max(dot(normal, lightDir), 0.0);
     
-    // Añadimos un poco de luz ambiental simulada para las zonas en sombra
-    vec3 ambientLight = vec3(0.2, 0.25, 0.3) * terrainColor;
+    // Luz ambiental suave con tinte azulado (luz del cielo)
+    vec3 ambientLight = vec3(0.1, 0.15, 0.25) * terrainColor;
+    
+    // Color principal
     vec3 diffuseLight = diff * uSunColor * terrainColor;
-
-    // Sombreado adicional basado en la pendiente (las zonas más planas reciben más luz cenital)
-    float slope = 1.0 - dot(normal, vec3(0.0, 1.0, 0.0));
-    terrainColor = mix(terrainColor, terrainColor * 0.7, smoothstep(0.0, 0.5, slope));
 
     vec3 finalColor = ambientLight + diffuseLight;
 
@@ -181,37 +165,26 @@ const fragmentShader = `
 export default function MountainShader() {
   const meshRef = useRef<THREE.Mesh>(null)
 
-  // 8. Uniforms en JavaScript
-  // Ajustes de generación procedural del terreno
   const uniforms = useMemo(() => ({
-    uMaxHeight: { value: 2.5 },               // Altura máxima
-    uScale: { value: 0.1 },                  // Escala general del terreno
-    uOctaves: { value: 6 },                   // Número de octavas para FBM
-    uFrequency: { value: 0.3 },               // Frecuencia inicial
-    uAmplitude: { value: 1.0 },               // Amplitud inicial
-    uDomainWarpingStrength: { value: 0.2 },   // Fuerza de la distorsión
-    uDomainWarpingScale: { value: 0.2 },      // Escala de la distorsión
-    uRidgedStrength: { value: 0.3 },          // Fuerza de los picos afilados
-    uSunDirection: { value: new THREE.Vector3(1, 1, 0.5) }, // Dirección de la luz principal
-    uSunColor: { value: new THREE.Color(1.0, 0.95, 0.8) },  // Color de la luz
+    uMaxHeight: { value: 6.0 },               // Elevación máxima
+    uScale: { value: 0.18 },                  // Zoom del ruido (menor = montañas más anchas)
+    uSunDirection: { value: new THREE.Vector3(1.0, 0.8, 0.5) }, 
+    uSunColor: { value: new THREE.Color(1.0, 0.9, 0.8) },  
   }), [])
 
-  useFrame(() => {
-    // Si quisieras animar el terreno, podrías actualizar un uniform de tiempo aquí.
+  // Para darle un ligero movimiento a la luz y apreciar el relieve (opcional)
+  useFrame(({ clock }) => {
+    // uniforms.uSunDirection.value.x = Math.sin(clock.getElapsedTime() * 0.5);
+    // uniforms.uSunDirection.value.z = Math.cos(clock.getElapsedTime() * 0.5);
   })
 
   return (
-    <mesh ref={meshRef} rotation={[-Math.PI / 2, 0, 0]} position={[0, -1, 0]}>
-      {/* 
-        Un plano con alta densidad de vértices para que los shaders puedan
-        desplazar el terreno con suficiente resolución geométrica.
-      */}
-      <planeGeometry args={[20, 20, 512, 512]} />
+    <mesh ref={meshRef} rotation={[-Math.PI / 2, 0, 0]} position={[0, -2, 0]}>
+      <planeGeometry args={[40, 40, 512, 512]} />
       <shaderMaterial
         vertexShader={vertexShader}
         fragmentShader={fragmentShader}
         uniforms={uniforms}
-        // No aplicamos DoubleSide para el terreno, las normales están configuradas para la cara frontal.
       />
     </mesh>
   )
