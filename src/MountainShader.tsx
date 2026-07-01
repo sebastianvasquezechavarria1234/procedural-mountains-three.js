@@ -1,5 +1,5 @@
-import { useRef, useMemo } from 'react'
-
+import { useRef, useMemo, useEffect } from 'react'
+import { useThree } from '@react-three/fiber'
 import * as THREE from 'three'
 
 const vertexShader = `
@@ -48,6 +48,7 @@ const vertexShader = `
   varying float vElevation;
   varying vec3 vNormal;
   varying vec3 vPosition;
+  varying float vDistance; // Distancia a la cámara para la niebla atmosférica
 
   // 2. FBM (Ridged Multifractal)
   // Este es el algoritmo estándar de la industria para generar cadenas montañosas.
@@ -55,6 +56,12 @@ const vertexShader = `
   // sean suaves y los picos sean muy escarpados.
   float getElevation(vec2 p) {
     vec2 pos = p * uScale;
+    
+    // Macro-variación: Ruido de muy baja frecuencia para agrupar cordilleras
+    // Esto rompe la uniformidad, creando regiones de montañas altas y regiones de llanuras
+    float macroNoise = snoise(pos * 0.3) * 0.5 + 0.5; 
+    // Suavizamos el rango para que haya un buen contraste entre zonas altas y bajas
+    macroNoise = smoothstep(0.0, 0.8, macroNoise);
     
     float value = 0.0;
     float amplitude = 0.6;
@@ -79,8 +86,14 @@ const vertexShader = `
       pos = rot * pos; // Rotar coordenadas en cada octava para mayor naturalidad
     }
     
-    // Suavizamos un poco el valle base
-    return (value * value * 0.7) * uMaxHeight;
+    // Elevación base de la montaña
+    float baseElevation = value * value * 0.7;
+    
+    // Aplicamos el macro-ruido como una máscara multiplicativa, 
+    // sumando un mínimo (0.15) para que no queden agujeros totalmente planos.
+    float finalElevation = baseElevation * (macroNoise + 0.15);
+    
+    return finalElevation * uMaxHeight;
   }
 
   void main() {
@@ -108,7 +121,11 @@ const vertexShader = `
     vec3 objectNormal = normalize(cross(tangentX, tangentY));
     vNormal = normalize((modelMatrix * vec4(objectNormal, 0.0)).xyz);
 
-    gl_Position = projectionMatrix * viewMatrix * vec4(vPosition, 1.0);
+    vec4 mvPosition = viewMatrix * vec4(vPosition, 1.0);
+    gl_Position = projectionMatrix * mvPosition;
+    
+    // Calculamos la distancia desde la cámara para la niebla atmosférica
+    vDistance = -mvPosition.z;
   }
 `;
 
@@ -116,18 +133,21 @@ const fragmentShader = `
   varying float vElevation;
   varying vec3 vNormal;
   varying vec3 vPosition;
+  varying float vDistance;
 
   uniform float uMaxHeight;
   uniform vec3 uSunDirection;
   uniform vec3 uSunColor;
+  uniform vec3 uFogColor;
+  uniform float uFogDensity;
 
   void main() {
-    // 7. Coloreado por altura y pendiente (Biome Blending Realista)
-    // Colores realistas de una montaña alpina (más desaturados y naturales)
-    vec3 colorValley = vec3(0.13, 0.18, 0.12);  // Valle profundo, bosque oscuro
-    vec3 colorBase = vec3(0.28, 0.32, 0.20);    // Pradera / musgo alpino
-    vec3 colorRock = vec3(0.35, 0.35, 0.37);    // Roca grisácea sólida
-    vec3 colorSnow = vec3(0.92, 0.95, 0.98);    // Nieve pura (con ligero tinte azulado)
+    // 7. Coloreado por altura y pendiente (Biome Blending Ultra Realista)
+    // Tonos extraídos de fotografías aéreas alpinas
+    vec3 colorValley = vec3(0.08, 0.12, 0.07);  // Bosque de pinos muy denso y oscuro
+    vec3 colorBase = vec3(0.18, 0.22, 0.13);    // Tundra subalpina, musgo seco
+    vec3 colorRock = vec3(0.22, 0.21, 0.20);    // Roca de granito gris neutro
+    vec3 colorSnow = vec3(0.85, 0.90, 0.95);    // Nieve blanca con dispersión azul del cielo
 
     float h = vElevation / uMaxHeight; // Altura normalizada 0.0 a 1.0
     vec3 normal = normalize(vNormal);
@@ -154,13 +174,18 @@ const fragmentShader = `
     // Iluminación difusa (Lambert)
     float diff = max(dot(normal, lightDir), 0.0);
     
-    // Luz ambiental suave imitando el rebote del cielo azul
-    vec3 ambientLight = vec3(0.15, 0.20, 0.30) * terrainColor * 0.7;
+    // Luz ambiental (cielo iluminando sombras)
+    vec3 ambientLight = vec3(0.20, 0.30, 0.45) * terrainColor * 0.8; // Más azul para dar escala
     
     // Color principal direccional
     vec3 diffuseLight = diff * uSunColor * terrainColor;
 
     vec3 finalColor = ambientLight + diffuseLight;
+
+    // 10. Niebla Atmosférica (Fog Exponencial)
+    // Es indispensable para percibir la escala masiva. Oculta el fondo suavemente.
+    float fogFactor = 1.0 - exp(-uFogDensity * uFogDensity * vDistance * vDistance);
+    finalColor = mix(finalColor, uFogColor, clamp(fogFactor, 0.0, 1.0));
 
     // Corrección gamma sutil para contraste cinemático
     finalColor = pow(finalColor, vec3(0.9));
@@ -171,12 +196,20 @@ const fragmentShader = `
 
 export default function MountainShader() {
   const meshRef = useRef<THREE.Mesh>(null)
+  const { scene } = useThree()
+
+  // Sincronizar color del cielo de Three.js con nuestra niebla
+  useEffect(() => {
+    scene.background = new THREE.Color(0x8ab4f8) // Un azul de cielo claro y fotorealista
+  }, [scene])
 
   const uniforms = useMemo(() => ({
     uMaxHeight: { value: 7.0 },               // Elevación máxima ajustada a la nueva escala
     uScale: { value: 0.12 },                  // Zoom del ruido a un punto medio exacto
-    uSunDirection: { value: new THREE.Vector3(1.0, 0.8, 0.5) }, 
-    uSunColor: { value: new THREE.Color(1.0, 0.9, 0.8) },  
+    uSunDirection: { value: new THREE.Vector3(0.8, 0.6, 0.6) }, // Sol más bajo (atardecer/amanecer)
+    uSunColor: { value: new THREE.Color(1.0, 0.93, 0.85) },     // Luz dorada cálida
+    uFogColor: { value: new THREE.Color(0x8ab4f8) },            // Color del cielo/niebla
+    uFogDensity: { value: 0.025 },                              // Densidad para difuminar montañas lejanas
   }), [])
 
 
