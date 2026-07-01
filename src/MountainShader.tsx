@@ -1,4 +1,5 @@
 import { useRef, useMemo, useEffect } from 'react'
+import { useFrame } from '@react-three/fiber'
 import { useThree } from '@react-three/fiber'
 import * as THREE from 'three'
 
@@ -140,55 +141,60 @@ const fragmentShader = `
   uniform vec3 uSunColor;
   uniform vec3 uFogColor;
   uniform float uFogDensity;
+  uniform vec3 uCameraPos; // Posición de la cámara para el especular
 
   void main() {
     // 7. Coloreado por altura y pendiente (Biome Blending Ultra Realista)
-    // Tonos extraídos de fotografías aéreas alpinas
-    vec3 colorValley = vec3(0.08, 0.12, 0.07);  // Bosque de pinos muy denso y oscuro
-    vec3 colorBase = vec3(0.18, 0.22, 0.13);    // Tundra subalpina, musgo seco
-    vec3 colorRock = vec3(0.22, 0.21, 0.20);    // Roca de granito gris neutro
-    vec3 colorSnow = vec3(0.85, 0.90, 0.95);    // Nieve blanca con dispersión azul del cielo
+    vec3 colorValley = vec3(0.08, 0.12, 0.07);  // Bosque de pinos denso y oscuro
+    vec3 colorBase   = vec3(0.18, 0.22, 0.13);  // Tundra subalpina, musgo seco
+    vec3 colorRock   = vec3(0.22, 0.21, 0.20);  // Roca de granito gris neutro
+    vec3 colorSnow   = vec3(0.87, 0.92, 0.97);  // Nieve con tinte azul del cielo
 
-    float h = vElevation / uMaxHeight; // Altura normalizada 0.0 a 1.0
+    float h = vElevation / uMaxHeight;
     vec3 normal = normalize(vNormal);
-    float slope = dot(normal, vec3(0.0, 1.0, 0.0)); // 1.0 = totalmente plano, 0.0 = vertical
-    float steepness = 1.0 - slope; // 0.0 = plano, 1.0 = vertical
+    float slope = dot(normal, vec3(0.0, 1.0, 0.0));
+    float steepness = 1.0 - slope;
 
-    // Base del terreno (mezcla entre bosque y pradera por altura)
+    // Mezcla base por altura
     vec3 terrainColor = mix(colorValley, colorBase, smoothstep(0.0, 0.15, h));
 
-    // La roca se revela en pendientes escarpadas (sin importar si está bajo o alto)
-    // Y también por altura natural (por encima de la línea de árboles)
-    float rockMixBySlope = smoothstep(0.3, 0.5, steepness);
-    float rockMixByHeight = smoothstep(0.35, 0.55, h);
-    terrainColor = mix(terrainColor, colorRock, max(rockMixBySlope, rockMixByHeight));
+    // Roca por pendiente y por altura (línea de árboles)
+    float rockFactor = max(smoothstep(0.3, 0.5, steepness), smoothstep(0.35, 0.55, h));
+    terrainColor = mix(terrainColor, colorRock, rockFactor);
 
-    // Añadir nieve en las cumbres, pero solo se acumula donde no es muy empinado
-    // Las grietas o paredes verticales altas seguirán siendo roca
-    float snowAccumulation = smoothstep(0.55, 0.75, h) * smoothstep(0.4, 0.8, slope);
-    terrainColor = mix(terrainColor, colorSnow, snowAccumulation);
+    // Nieve acumulada en zonas planas y altas
+    float snowFactor = smoothstep(0.55, 0.75, h) * smoothstep(0.4, 0.8, slope);
+    terrainColor = mix(terrainColor, colorSnow, snowFactor);
 
-    // 9. Renderizado final (Iluminación)
+    // 9. Iluminación Blinn-Phong (Difusa + Especular)
     vec3 lightDir = normalize(uSunDirection);
-    
-    // Iluminación difusa (Lambert)
+    vec3 viewDir  = normalize(uCameraPos - vPosition);
+    vec3 halfVec  = normalize(lightDir + viewDir); // Vector medio para Blinn-Phong
+
+    // Difusa (Lambert)
     float diff = max(dot(normal, lightDir), 0.0);
-    
-    // Luz ambiental (cielo iluminando sombras)
-    vec3 ambientLight = vec3(0.20, 0.30, 0.45) * terrainColor * 0.8; // Más azul para dar escala
-    
-    // Color principal direccional
+
+    // Especular: solo la nieve y el hielo son brillantes (shininess alta = reflejo pequeño y duro)
+    float shininess  = 64.0;
+    float specAmount = pow(max(dot(normal, halfVec), 0.0), shininess);
+    // Enmascaramos el especular para que solo aparezca en zonas con nieve
+    float specMask   = snowFactor * smoothstep(0.55, 0.75, h);
+    vec3 specular    = specAmount * specMask * uSunColor * 0.6;
+
+    // Luz ambiental (tinte azul del cielo rebotando en las sombras)
+    vec3 ambientLight = vec3(0.18, 0.28, 0.42) * terrainColor * 0.85;
     vec3 diffuseLight = diff * uSunColor * terrainColor;
 
-    vec3 finalColor = ambientLight + diffuseLight;
+    // Sombra de contacto suave: las zonas muy en sombra se oscurecen un poco más
+    float shadowDarkening = mix(0.6, 1.0, diff);
+    vec3 finalColor = (ambientLight + diffuseLight) * shadowDarkening + specular;
 
-    // 10. Niebla Atmosférica (Fog Exponencial)
-    // Es indispensable para percibir la escala masiva. Oculta el fondo suavemente.
+    // 10. Niebla Atmosférica Exponencial al Cuadrado (más realista que la lineal)
     float fogFactor = 1.0 - exp(-uFogDensity * uFogDensity * vDistance * vDistance);
     finalColor = mix(finalColor, uFogColor, clamp(fogFactor, 0.0, 1.0));
 
-    // Corrección gamma sutil para contraste cinemático
-    finalColor = pow(finalColor, vec3(0.9));
+    // Corrección gamma (de espacio lineal a sRGB perceptual)
+    finalColor = pow(max(finalColor, 0.0), vec3(0.88));
 
     gl_FragColor = vec4(finalColor, 1.0);
   }
@@ -196,23 +202,26 @@ const fragmentShader = `
 
 export default function MountainShader() {
   const meshRef = useRef<THREE.Mesh>(null)
-  const { scene } = useThree()
+  const { scene, camera } = useThree()
 
-  // Sincronizar color del cielo de Three.js con nuestra niebla
   useEffect(() => {
-    scene.background = new THREE.Color(0x8ab4f8) // Un azul de cielo claro y fotorealista
+    scene.background = new THREE.Color(0x8ab4f8)
   }, [scene])
 
   const uniforms = useMemo(() => ({
-    uMaxHeight: { value: 7.0 },               // Elevación máxima ajustada a la nueva escala
-    uScale: { value: 0.12 },                  // Zoom del ruido a un punto medio exacto
-    uSunDirection: { value: new THREE.Vector3(0.8, 0.6, 0.6) }, // Sol más bajo (atardecer/amanecer)
-    uSunColor: { value: new THREE.Color(1.0, 0.93, 0.85) },     // Luz dorada cálida
-    uFogColor: { value: new THREE.Color(0x8ab4f8) },            // Color del cielo/niebla
-    uFogDensity: { value: 0.025 },                              // Densidad para difuminar montañas lejanas
+    uMaxHeight:             { value: 7.0 },
+    uScale:                 { value: 0.12 },
+    uSunDirection:          { value: new THREE.Vector3(0.8, 0.6, 0.6) },
+    uSunColor:              { value: new THREE.Color(1.0, 0.93, 0.85) },
+    uFogColor:              { value: new THREE.Color(0x8ab4f8) },
+    uFogDensity:            { value: 0.025 },
+    uCameraPos:             { value: new THREE.Vector3() }, // Se actualiza cada frame
   }), [])
 
-
+  // Actualizamos la posición de la cámara cada frame para el cálculo especular
+  useFrame(({ camera }) => {
+    uniforms.uCameraPos.value.copy(camera.position)
+  })
 
   return (
     <mesh ref={meshRef} rotation={[-Math.PI / 2, 0, 0]} position={[0, -2, 0]}>
