@@ -1,5 +1,5 @@
 import { useRef, useMemo } from 'react'
-import { useFrame } from '@react-three/fiber'
+
 import * as THREE from 'three'
 
 const vertexShader = `
@@ -122,41 +122,48 @@ const fragmentShader = `
   uniform vec3 uSunColor;
 
   void main() {
-    // 7. Coloreado por altura y biomas
-    // Colores realistas de una montaña alpina
-    vec3 colorValley = vec3(0.12, 0.25, 0.10);  // Verde bosque oscuro para los valles
-    vec3 colorBase = vec3(0.25, 0.35, 0.15);    // Verde claro/musgo para faldas de la montaña
-    vec3 colorRock = vec3(0.40, 0.38, 0.35);    // Roca gris/café para la ladera
-    vec3 colorSnow = vec3(0.95, 0.98, 1.00);    // Nieve pura para las cumbres
+    // 7. Coloreado por altura y pendiente (Biome Blending Realista)
+    // Colores realistas de una montaña alpina (más desaturados y naturales)
+    vec3 colorValley = vec3(0.13, 0.18, 0.12);  // Valle profundo, bosque oscuro
+    vec3 colorBase = vec3(0.28, 0.32, 0.20);    // Pradera / musgo alpino
+    vec3 colorRock = vec3(0.35, 0.35, 0.37);    // Roca grisácea sólida
+    vec3 colorSnow = vec3(0.92, 0.95, 0.98);    // Nieve pura (con ligero tinte azulado)
 
-    float h = vElevation / uMaxHeight; // Normalizado 0.0 a 1.0
-
-    // Transiciones naturales
-    vec3 terrainColor = mix(colorValley, colorBase, smoothstep(0.0, 0.2, h));
-    terrainColor = mix(terrainColor, colorRock, smoothstep(0.2, 0.5, h));
-    terrainColor = mix(terrainColor, colorSnow, smoothstep(0.6, 0.85, h));
-
-    // Añadir nieve en las grietas o pendientes suaves altas
+    float h = vElevation / uMaxHeight; // Altura normalizada 0.0 a 1.0
     vec3 normal = normalize(vNormal);
-    float slope = dot(normal, vec3(0.0, 1.0, 0.0)); // Qué tan plana es la superficie (1.0 = plano)
-    
-    // Si estamos alto y es plano, se acumula nieve
-    float snowAccumulation = smoothstep(0.4, 0.6, h) * smoothstep(0.7, 0.9, slope);
-    terrainColor = mix(terrainColor, colorSnow, snowAccumulation * 0.8);
+    float slope = dot(normal, vec3(0.0, 1.0, 0.0)); // 1.0 = totalmente plano, 0.0 = vertical
+    float steepness = 1.0 - slope; // 0.0 = plano, 1.0 = vertical
+
+    // Base del terreno (mezcla entre bosque y pradera por altura)
+    vec3 terrainColor = mix(colorValley, colorBase, smoothstep(0.0, 0.15, h));
+
+    // La roca se revela en pendientes escarpadas (sin importar si está bajo o alto)
+    // Y también por altura natural (por encima de la línea de árboles)
+    float rockMixBySlope = smoothstep(0.3, 0.5, steepness);
+    float rockMixByHeight = smoothstep(0.35, 0.55, h);
+    terrainColor = mix(terrainColor, colorRock, max(rockMixBySlope, rockMixByHeight));
+
+    // Añadir nieve en las cumbres, pero solo se acumula donde no es muy empinado
+    // Las grietas o paredes verticales altas seguirán siendo roca
+    float snowAccumulation = smoothstep(0.55, 0.75, h) * smoothstep(0.4, 0.8, slope);
+    terrainColor = mix(terrainColor, colorSnow, snowAccumulation);
 
     // 9. Renderizado final (Iluminación)
     vec3 lightDir = normalize(uSunDirection);
     
-    // Iluminación difusa
+    // Iluminación difusa (Lambert)
     float diff = max(dot(normal, lightDir), 0.0);
     
-    // Luz ambiental suave con tinte azulado (luz del cielo)
-    vec3 ambientLight = vec3(0.1, 0.15, 0.25) * terrainColor;
+    // Luz ambiental suave imitando el rebote del cielo azul
+    vec3 ambientLight = vec3(0.15, 0.20, 0.30) * terrainColor * 0.7;
     
-    // Color principal
+    // Color principal direccional
     vec3 diffuseLight = diff * uSunColor * terrainColor;
 
     vec3 finalColor = ambientLight + diffuseLight;
+
+    // Corrección gamma sutil para contraste cinemático
+    finalColor = pow(finalColor, vec3(0.9));
 
     gl_FragColor = vec4(finalColor, 1.0);
   }
@@ -166,17 +173,13 @@ export default function MountainShader() {
   const meshRef = useRef<THREE.Mesh>(null)
 
   const uniforms = useMemo(() => ({
-    uMaxHeight: { value: 6.0 },               // Elevación máxima
-    uScale: { value: 0.18 },                  // Zoom del ruido (menor = montañas más anchas)
+    uMaxHeight: { value: 10.0 },              // Elevación máxima (aumentada para compensar la escala)
+    uScale: { value: 0.05 },                  // Zoom del ruido (menor = montañas mucho más anchas y escasas)
     uSunDirection: { value: new THREE.Vector3(1.0, 0.8, 0.5) }, 
     uSunColor: { value: new THREE.Color(1.0, 0.9, 0.8) },  
   }), [])
 
-  // Para darle un ligero movimiento a la luz y apreciar el relieve (opcional)
-  useFrame(({ clock }) => {
-    // uniforms.uSunDirection.value.x = Math.sin(clock.getElapsedTime() * 0.5);
-    // uniforms.uSunDirection.value.z = Math.cos(clock.getElapsedTime() * 0.5);
-  })
+
 
   return (
     <mesh ref={meshRef} rotation={[-Math.PI / 2, 0, 0]} position={[0, -2, 0]}>
