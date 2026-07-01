@@ -80,7 +80,7 @@ const vertexShader = `
       if (float(i) >= uOctaves) break; // Limitamos según el uniform
       
       // Combinamos ruido normal con ridged noise según uRidgedStrength
-      float n = mix(snoise(warpedP * frequency), ridgedNoise(warpedP * frequency), uRidgedStrength);
+      float n = mix(snoise(warpedP * frequency) * 0.5 + 0.5, ridgedNoise(warpedP * frequency), uRidgedStrength);
       
       value += n * amplitude;
       
@@ -110,7 +110,7 @@ const vertexShader = `
     // Calculamos la elevación en puntos cercanos para obtener los vectores tangentes y luego la normal.
     float offset = 0.01;
     float elevationX = getElevation(position.xy + vec2(offset, 0.0));
-    float elevationZ = getElevation(position.xy + vec2(0.0, offset));
+    float elevationY = getElevation(position.xy + vec2(0.0, offset));
     
     vec3 p0 = vec3(position.x, position.y, elevation);
     vec3 pX = vec3(position.x + offset, position.y, elevationX);
@@ -184,14 +184,14 @@ export default function MountainShader() {
   // 8. Uniforms en JavaScript
   // Ajustes de generación procedural del terreno
   const uniforms = useMemo(() => ({
-    uMaxHeight: { value: 3.5 },               // Altura máxima
-    uScale: { value: 0.15 },                  // Escala general del terreno
+    uMaxHeight: { value: 2.5 },               // Altura máxima
+    uScale: { value: 0.1 },                  // Escala general del terreno
     uOctaves: { value: 6 },                   // Número de octavas para FBM
-    uFrequency: { value: 1.0 },               // Frecuencia inicial
+    uFrequency: { value: 0.3 },               // Frecuencia inicial
     uAmplitude: { value: 1.0 },               // Amplitud inicial
-    uDomainWarpingStrength: { value: 1.5 },   // Fuerza de la distorsión
-    uDomainWarpingScale: { value: 0.5 },      // Escala de la distorsión
-    uRidgedStrength: { value: 0.6 },          // Fuerza de los picos afilados
+    uDomainWarpingStrength: { value: 0.2 },   // Fuerza de la distorsión
+    uDomainWarpingScale: { value: 0.2 },      // Escala de la distorsión
+    uRidgedStrength: { value: 0.3 },          // Fuerza de los picos afilados
     uSunDirection: { value: new THREE.Vector3(1, 1, 0.5) }, // Dirección de la luz principal
     uSunColor: { value: new THREE.Color(1.0, 0.95, 0.8) },  // Color de la luz
   }), [])
