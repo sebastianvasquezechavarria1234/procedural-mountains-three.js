@@ -173,8 +173,8 @@ export default function MountainShader() {
   const meshRef = useRef<THREE.Mesh>(null)
 
   const uniforms = useMemo(() => ({
-    uMaxHeight: { value: 10.0 },              // Elevación máxima (aumentada para compensar la escala)
-    uScale: { value: 0.05 },                  // Zoom del ruido (menor = montañas mucho más anchas y escasas)
+    uMaxHeight: { value: 7.0 },               // Elevación máxima ajustada a la nueva escala
+    uScale: { value: 0.12 },                  // Zoom del ruido a un punto medio exacto
     uSunDirection: { value: new THREE.Vector3(1.0, 0.8, 0.5) }, 
     uSunColor: { value: new THREE.Color(1.0, 0.9, 0.8) },  
   }), [])
