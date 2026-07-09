@@ -18,8 +18,7 @@
 
 <br>
 
-<img src="preview.jpg" alt="Montañas — Procedural Terrain Preview" width="100%" />
-
+<img src="public/preview.jpg" alt="Montañas — Procedural Terrain Preview" width="100%" />
 </div>
 
 ---
