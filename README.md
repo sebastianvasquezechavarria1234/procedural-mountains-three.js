@@ -18,7 +18,7 @@
 
 <br>
 
-<img src="public/preview.jpg" alt="Montañas — Procedural Terrain Preview" width="100%" />
+<img src="preview.jpg" alt="Montañas — Procedural Terrain Preview" width="100%" />
 
 </div>
 
@@ -300,5 +300,9 @@ Educational and personal use project. Not licensed for production.
 <div align="center">
 
 *A landscape that didn't exist until the GPU painted it.*
+</br>
+
+Made with ❤️ by <a href="https://sebas-dev.vercel.app/" target="_blank" rel="noopener noreferrer">Sebastián V</a>
+
 
 </div>

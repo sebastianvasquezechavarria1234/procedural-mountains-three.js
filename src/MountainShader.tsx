@@ -1,6 +1,5 @@
 import { useRef, useMemo } from 'react'
 import { useFrame } from '@react-three/fiber'
-import { useThree } from '@react-three/fiber'
 import * as THREE from 'three'
 
 const vertexShader = `
@@ -202,7 +201,6 @@ const fragmentShader = `
 
 export default function MountainShader() {
   const meshRef = useRef<THREE.Mesh>(null)
-  const { scene, camera } = useThree()
 
   const uniforms = useMemo(() => ({
     uMaxHeight:             { value: 7.0 },
