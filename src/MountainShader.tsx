@@ -204,10 +204,6 @@ export default function MountainShader() {
   const meshRef = useRef<THREE.Mesh>(null)
   const { scene, camera } = useThree()
 
-  useEffect(() => {
-    scene.background = new THREE.Color(0x8ab4f8)
-  }, [scene])
-
   const uniforms = useMemo(() => ({
     uMaxHeight:             { value: 7.0 },
     uScale:                 { value: 0.12 },

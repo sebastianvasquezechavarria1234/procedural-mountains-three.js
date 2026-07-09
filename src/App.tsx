@@ -1,15 +1,34 @@
-import { Canvas } from '@react-three/fiber'
+import { Canvas, useLoader } from '@react-three/fiber'
 import { OrbitControls } from '@react-three/drei'
 import { EffectComposer, Bloom, Vignette } from '@react-three/postprocessing'
+import * as THREE from 'three'
 import MountainShader from './MountainShader'
+
+function OrbitSphere() {
+  const texture = useLoader(THREE.TextureLoader, '/bg.jpg')
+  texture.colorSpace = THREE.SRGBColorSpace
+
+  return (
+    <mesh>
+      <sphereGeometry args={[50, 64, 64]} />
+      <meshBasicMaterial map={texture} side={THREE.BackSide} />
+    </mesh>
+  )
+}
 
 export default function App() {
   return (
     <div className="w-screen h-screen bg-black">
       <Canvas
-        camera={{ position: [0, 8, 18], fov: 60 }}
-        gl={{ antialias: true, toneMapping: 4 /* ACESFilmicToneMapping */ }}
+        camera={{ position: [0, 0, 0], fov: 60 }}
+        gl={{ antialias: true, toneMapping: 4 }}
       >
+        <OrbitSphere />
+
+        <group>
+          <MountainShader />
+        </group>
+
         <OrbitControls
           minDistance={5}
           maxDistance={35}
@@ -19,23 +38,16 @@ export default function App() {
           dampingFactor={0.05}
         />
 
-        {/* Terreno montañoso procedural */}
-        <MountainShader />
-
-        {/* 2. Post-procesado cinematográfico
-            EffectComposer aplica efectos en pantalla completa sobre el render final.
-            Bloom: hace que las luces brillantes "deramen" luz a su alrededor (nieve brillante).
-            Vignette: oscurece los bordes del encuadre para enfocar al centro, como una lente de cámara. */}
         <EffectComposer>
           <Bloom
-            luminanceThreshold={0.6}  // Solo brillan los píxeles más luminosos que esto
-            luminanceSmoothing={0.4}  // Transición suave del umbral
-            intensity={0.4}           // Intensidad del efecto (sutil, no excesivo)
+            luminanceThreshold={0.6}
+            luminanceSmoothing={0.4}
+            intensity={0.4}
           />
           <Vignette
             eskil={false}
-            offset={0.2}    // Qué tan adentro empieza el oscurecimiento
-            darkness={0.6}  // Qué tan oscuros se hacen los bordes
+            offset={0.2}
+            darkness={0.6}
           />
         </EffectComposer>
       </Canvas>
