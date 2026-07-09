@@ -1,20 +1,7 @@
-import { Canvas, useLoader } from '@react-three/fiber'
+import { Canvas } from '@react-three/fiber'
 import { OrbitControls } from '@react-three/drei'
 import { EffectComposer, Bloom, Vignette } from '@react-three/postprocessing'
-import * as THREE from 'three'
 import MountainShader from './MountainShader'
-
-function OrbitSphere() {
-  const texture = useLoader(THREE.TextureLoader, '/bg.jpg')
-  texture.colorSpace = THREE.SRGBColorSpace
-
-  return (
-    <mesh>
-      <sphereGeometry args={[50, 64, 64]} />
-      <meshBasicMaterial map={texture} side={THREE.BackSide} />
-    </mesh>
-  )
-}
 
 export default function App() {
   return (
@@ -23,8 +10,7 @@ export default function App() {
         camera={{ position: [0, 0, 0], fov: 60 }}
         gl={{ antialias: true, toneMapping: 4 }}
       >
-        <OrbitSphere />
-
+        <color attach="background" args={['white']} />
         <group>
           <MountainShader />
         </group>
