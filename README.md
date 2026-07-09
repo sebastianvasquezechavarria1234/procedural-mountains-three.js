@@ -291,11 +291,7 @@ The 512×512 vertex geometry is the practical limit. Going to 1024×1024 would m
 
 ---
 
-## 9. License
 
-Educational and personal use project. Not licensed for production.
-
----
 
 <div align="center">
 
